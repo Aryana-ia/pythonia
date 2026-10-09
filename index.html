@@ -4,6 +4,15 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>Pythonia: aprende Python jugando</title>
+<meta name="description" content="Aprende Python desde cero en español: lecciones, prácticas que se corrigen solas y un proyecto real por nivel.">
+<meta name="theme-color" content="#0E3B43">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" type="image/png" href="icons/favicon.png">
+<link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="Pythonia">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,500;12..96,700;12..96,800&family=Atkinson+Hyperlegible:ital,wght@0,400;0,700;1,400&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
@@ -229,6 +238,7 @@ ul.errs{padding-left:18px}ul.errs li{margin:6px 0}
 .linkbtn{background:none;border:0;padding:0;color:inherit;text-decoration:underline;font-weight:700;cursor:pointer}
 .code.proyecto{max-height:420px;overflow:auto}
 .btn:disabled{opacity:.55;cursor:not-allowed}
+.res a{color:var(--hoja);text-decoration-thickness:1.5px;text-underline-offset:2px}
 .sheet header button{white-space:nowrap;flex:none}
 .sheet header span{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 </style>
@@ -260,6 +270,90 @@ try {
   if (raw) S = Object.assign(fresh(), JSON.parse(raw));
 } catch(e) { S = fresh(); }
 function save(){ try { localStorage.setItem(KEY, JSON.stringify(S)); } catch(e) {} }
+
+/* ───────── app instalable y versión de Claude ───────── */
+const APP_URL = "https://aryana-ia.github.io/pythonia/";
+const ES_APP = location.protocol.startsWith("http") && location.href.startsWith(APP_URL.slice(0, -1))
+  || ["localhost", "127.0.0.1"].includes(location.hostname);
+const PDF_BASE = ES_APP ? "pdf/" : APP_URL + "pdf/";
+let pedidoInstalar = null;
+window.addEventListener("beforeinstallprompt", e => { e.preventDefault(); pedidoInstalar = e; if (tab === "inicio") render(); });
+window.addEventListener("appinstalled", () => { pedidoInstalar = null; toast("Pythonia quedó instalada 🐍"); });
+if (ES_APP && "serviceWorker" in navigator) window.addEventListener("load", () => navigator.serviceWorker.register("sw.js").catch(() => {}));
+const enModoApp = () => matchMedia("(display-mode: standalone)").matches || navigator.standalone === true;
+const esIOS = () => /iphone|ipad|ipod/i.test(navigator.userAgent) || (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1);
+
+/* Pase de progreso entre la app instalable y la versión de Claude: se suma, no se pisa nada */
+function codigoProgreso(){
+  const json = JSON.stringify(S), bytes = new TextEncoder().encode(json);
+  let bin = ""; bytes.forEach(b => bin += String.fromCharCode(b));
+  return "PYTHONIA1:" + btoa(bin);
+}
+function leerProgreso(txt){
+  const m = String(txt).trim().match(/^PYTHONIA1:([A-Za-z0-9+/=\s]+)$/);
+  if (!m) throw new Error("El texto no es un código de progreso de Pythonia. Cópialo completo: empieza con PYTHONIA1:");
+  const bin = atob(m[1].replace(/\s/g, "")), bytes = Uint8Array.from(bin, c => c.charCodeAt(0));
+  const o = JSON.parse(new TextDecoder().decode(bytes));
+  if (!o || typeof o !== "object" || typeof o.done !== "object") throw new Error("El código está incompleto o dañado.");
+  return o;
+}
+function sumarProgreso(o){
+  const antes = {lec: Object.keys(S.done).length, prac: Object.values(S.prac).filter(v => v && v.ok).length};
+  const unir = (a = {}, b = {}) => { const r = Object.assign({}, a); for (const k in b) if (r[k] == null || r[k] === "" || r[k] === false) r[k] = b[k]; return r; };
+  for (const k of ["done", "quiz", "pred", "daily", "deg", "mis", "proj", "fus", "code", "intentos", "pistas", "vioSol", "ultErr", "demo"]) S[k] = unir(S[k], o[k]);
+  S.quiz = Object.fromEntries(Object.entries(S.quiz).map(([k, v]) => [k, v === "ok" || (o.quiz || {})[k] === "ok" ? "ok" : v]));
+  const prac = Object.assign({}, S.prac);
+  for (const k in (o.prac || {})) if (o.prac[k] && o.prac[k].ok && !(prac[k] && prac[k].ok)) prac[k] = o.prac[k];
+  S.prac = prac;
+  S.xp = Math.max(S.xp || 0, o.xp || 0);
+  S.days = [...new Set([...(S.days || []), ...(o.days || [])])].sort().slice(-400);
+  const vistos = new Set(S.diary.map(e => JSON.stringify(e)));
+  (o.diary || []).forEach(e => { const j = JSON.stringify(e); if (!vistos.has(j)) { vistos.add(j); S.diary.push(e); } });
+  S.diary.sort((a, b) => String(a.date).localeCompare(String(b.date)));
+  for (const k of ["name", "principal", "secundaria", "test"]) if (!S[k] && o[k]) S[k] = o[k];
+  S.total = S.total || !!o.total;
+  save();
+  return {lec: Object.keys(S.done).length - antes.lec, prac: Object.values(S.prac).filter(v => v && v.ok).length - antes.prac};
+}
+function tarjetaApp(){
+  let instalar = "";
+  if (ES_APP && !enModoApp()) {
+    instalar = pedidoInstalar ? `<button class="btn sun" id="instalar">Instalar Pythonia</button>`
+      : esIOS() ? `<p class="muted" style="font-size:14px">Para instalarla en el iPhone: botón <b>Compartir</b> → <b>Agregar a inicio</b>.</p>`
+      : `<p class="muted" style="font-size:14px">Para instalarla: menú del navegador → <b>Instalar app</b> (o «Agregar a la pantalla principal»).</p>`;
+  }
+  return `<div class="card"><h3>${ES_APP ? "📱 Pythonia instalable" : "📱 La app para tu teléfono y tu PC"}</h3>
+    <p class="muted" style="font-size:14px">${ES_APP
+      ? (enModoApp() ? "Estás usando la app instalada. Funciona sin conexión: lecciones, prácticas y proyectos." : "Esta versión se instala como una app y funciona sin conexión.")
+      : "Instálala desde tu dirección de GitHub Pages: funciona sin conexión y evalúa tu código en el dispositivo."}</p>
+    ${instalar}
+    ${ES_APP ? "" : `<a class="btn sun" href="${APP_URL}" target="_blank" rel="noopener" style="display:inline-block;text-decoration:none">Abrir la app instalable</a>`}
+    <p class="muted" style="font-size:13.5px;margin-top:12px">Para llevar tu avance de una versión a otra: copia el código en una y pégalo en la otra. Se suma, no se pisa nada.</p>
+    <div class="row" style="flex-wrap:wrap"><button class="btn ghost" id="prog-copiar">Copiar mi progreso</button><button class="btn ghost" id="prog-pegar">Pegar progreso</button></div>
+    <div id="prog-zona"></div></div>`;
+}
+function bindTarjetaApp(){
+  const bi = $("#instalar");
+  if (bi) bi.onclick = async () => { const p = pedidoInstalar; if (!p) return; p.prompt(); try { await p.userChoice; } catch (e) {} pedidoInstalar = null; render(); };
+  $("#prog-copiar").onclick = async () => {
+    const c = codigoProgreso();
+    try { await navigator.clipboard.writeText(c); toast("Código de progreso copiado"); }
+    catch (e) {
+      $("#prog-zona").innerHTML = `<label for="prog-txt">Copia este código completo:</label><textarea id="prog-txt" class="mono" readonly>${esc(c)}</textarea>`;
+      const t = $("#prog-txt"); t.focus(); t.select();
+    }
+  };
+  $("#prog-pegar").onclick = () => {
+    $("#prog-zona").innerHTML = `<label for="prog-in">Pega aquí el código (empieza con PYTHONIA1:)</label><textarea id="prog-in" class="mono"></textarea>
+      <div class="row" style="margin-top:8px"><button class="btn" id="prog-ok">Sumar a mi progreso</button></div><p class="fb" id="prog-msg" role="alert"></p>`;
+    $("#prog-in").focus();
+    $("#prog-ok").onclick = () => {
+      try { const r = sumarProgreso(leerProgreso($("#prog-in").value));
+        toast(`Progreso sumado: +${r.lec} lecciones, +${r.prac} prácticas`); render(); }
+      catch (e) { $("#prog-msg").textContent = e.message || "No se pudo leer el código."; }
+    };
+  };
+}
 
 const ymd = d => d.getFullYear()+"-"+String(d.getMonth()+1).padStart(2,"0")+"-"+String(d.getDate()).padStart(2,"0");
 const today = () => ymd(new Date());
@@ -374,9 +468,10 @@ function inicio(){
   <div class="badges">${BADGES.map(b => `<div class="badge ${b[2]() ? "on" : ""}"><span class="ic">${b[0]}</span>${b[1]}</div>`).join("")}</div>
   <h2 class="section-t">Material de estudio</h2>
   <div class="card res"><p>Cada parte del árbol tiene su PDF para leer, imprimir y repasar:</p><ul>
-    ${D.levels.map(l => `<li><b>Manual Nivel ${l.id}: ${esc(l.nombre)}</b> · ${l.lecciones.length} lecciones${l.id >= 2 ? " + ejercicios con lente" : ""}</li>`).join("")}
-    ${D.rutas.map(r => `<li><b>Manual de ruta: ${esc(r.t)}</b> · ${r.modulos.length} módulos, ${RSEQ[r.slug].length} lecciones</li>`).join("")}
-    <li><b>Cuadernillo-Diario</b> · conceptos, tips, árbol de ramas y plantillas de registro</li></ul></div>
+    ${D.levels.map(l => `<li><a href="${PDF_BASE}Pythonia_Manual_Nivel${l.id}_${encodeURIComponent(l.nombre)}.pdf" target="_blank" rel="noopener"><b>Manual Nivel ${l.id}: ${esc(l.nombre)}</b></a> · ${l.lecciones.length} lecciones${l.id >= 2 ? " + ejercicios con lente" : ""}</li>`).join("")}
+    ${D.rutas.map(r => `<li><a href="${PDF_BASE}Pythonia_Ruta_${({auto: "Automatizacion", juegos: "Videojuegos", bd: "Bases_de_datos"})[r.slug]}.pdf" target="_blank" rel="noopener"><b>Manual de ruta: ${esc(r.t)}</b></a> · ${r.modulos.length} módulos, ${RSEQ[r.slug].length} lecciones</li>`).join("")}
+    <li><a href="${PDF_BASE}Pythonia_Cuadernillo_Diario.pdf" target="_blank" rel="noopener"><b>Cuadernillo-Diario</b></a> · conceptos, tips, bitácora de prácticas y plantillas para imprimir</li></ul></div>
+  ${tarjetaApp()}
   <div class="card"><label for="nm">¿Cómo te llamamos?</label>
     <div class="row"><input id="nm" value="${esc(S.name)}" placeholder="Tu nombre" maxlength="30"><button class="btn ghost" id="nm-save">Guardar</button></div>
     <p class="muted" style="font-size:13.5px;margin-top:10px">Tu progreso se guarda en este navegador.</p><button class="btn ghost" id="reset">Reiniciar progreso</button></div>`;
@@ -640,6 +735,7 @@ function degScore(score){ D.deg.forEach((d, i) => { if (S.deg[i] === "ok") score
    Respaldo 1: revisión de Claude (capacidad "sample") si el motor no puede cargarse.
    Respaldo 2: autorrevisión comparando con la solución. */
 
+const BRYTHON_LOCAL = "vendor/brython/";   // copia incluida en la app instalable (funciona sin conexión)
 const BRYTHON = "https://cdn.jsdelivr.net/npm/brython@3.14.3/";
 const motor = {estado: "sin-cargar", promesa: null, error: ""};
 
@@ -657,8 +753,10 @@ function cargarMotor(){
   motor.estado = "cargando"; avisarMotor();
   motor.promesa = (async () => {
     if (typeof window.brython !== "function") {
-      await cargarScript(BRYTHON + "brython.min.js");
-      await cargarScript(BRYTHON + "brython_stdlib.js");
+      let base = BRYTHON_LOCAL;
+      try { await cargarScript(base + "brython.min.js"); }
+      catch (e) { base = BRYTHON; await cargarScript(base + "brython.min.js"); }
+      await cargarScript(base + "brython_stdlib.js");
     }
     const s = document.createElement("script");
     s.type = "text/python"; s.id = "arnes-pythonia"; s.textContent = D.arnes;
@@ -677,7 +775,7 @@ function cargarMotor(){
   return motor.promesa;
 }
 function motorTexto(){
-  return ({"sin-cargar": "La primera evaluación descarga el motor de Python del navegador (unos 6 MB, una sola vez). Ctrl + Enter también evalúa.",
+  return ({"sin-cargar": (ES_APP ? "La primera evaluación prepara el motor de Python (unos segundos)." : "La primera evaluación descarga el motor de Python del navegador (unos 6 MB, una sola vez).") + " Ctrl + Enter también evalúa.",
            "cargando": "⏳ Descargando el motor de Python…",
            "listo": "✔ Motor de Python listo: tu código se ejecuta en este navegador.",
            "fallo": "⚠️ El motor de Python no pudo cargarse aquí (" + motor.error + "). Se usará una revisión alternativa."})[motor.estado];
@@ -1072,6 +1170,7 @@ function bindView(){
       if (!ok) b.classList.add("bad"); $("#daily-fb").innerHTML = (ok ? "<b>¡Bien!</b> " : "<b>Esta vez no.</b> ") + esc(dp.l.quiz.x);
       ok ? gain(30, "reto del día") : (touchDay(), save()); });
     $("#nm-save").onclick = () => { S.name = $("#nm").value.trim(); save(); render(); };
+    bindTarjetaApp();
     $("#reset").onclick = () => { if (confirm("Se borrarán tu XP, lecciones, rutas, insignias y diario de este navegador. ¿Continuar?")) { S = fresh(); save(); render(); toast("Progreso reiniciado"); } };
   }
   if (tab === "rutas"){
