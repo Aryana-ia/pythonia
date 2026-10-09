@@ -52,4 +52,4 @@ Se suma, no se pisa nada: se conserva lo mejor de cada lado.
 
 ---
 
-Proyecto de Ariana G. Romero Rodríguez, construido con Claude.
+Proyecto de Ariana G. Romero Rodríguez
